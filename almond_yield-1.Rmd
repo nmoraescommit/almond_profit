@@ -1,0 +1,102 @@
+---
+title: "EDS 230 - Assignment 2"
+author: "Naomi Moraes, Leilanie Rubinstein"
+date: "2025-04-13"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+format:
+  html:
+    embed-resources: true
+toc: true
+warning: false
+message: false
+---
+
+# Introduction
+
+In this document we will attempt to conduct sensitivity analysis on the almond profit function - created for this assignment. We will incorporate the almond yield anomaly function - created for the prior assignment - in the context of the study, "Impacts of future climate change on California perennial crop yields" Lobell et. al, 2006. 
+
+Yield anomalies are specifically defined as the percentage changes from a reference period's average yields. To find the profit, we used the equation 
+
+$$ Profit = Revenue - Costs $$
+We will assume that the entire yield produced will be sold at market, and that the costs of production are by acreage (according to: [Sample Costs to Produce an Orchard](https://coststudyfiles.ucdavis.edu/uploads/cs_public/67/b7/67b72c81-5ce0-4462-a396-fbb62ce8564e/2019sacvalleyalmonds.pdf) ). Thus, our equation can be further broken down as such:
+
+$$ Profit = (Quantity Produced * Market Price) - (ProductionCosts * Acreage)$$
+
+## Set-Up
+
+```{r}
+# Load libraries
+library(tidyverse)
+```
+
+```{r}
+# Import climate data
+clim <- read_delim(here::here("data", "clim.txt"))
+```
+
+```{r}
+# Source the function
+source(here::here("R","summary_yield.R"))
+source(here::here("R","almond_profit.R"))
+source(here::here("R","almond_yield.R"))
+```
+
+```{r}
+# Call the function
+profit <- almond_profit(clim)
+```
+
+# Sensitivity Analysis with Two Parameters
+
+Let's perform a sensitivity analysis on two key parameters:
+1. `acres` - Number of acres in production
+2. `production_cost` - Cost of production per acre (in USD)
+
+```{r sensitivity}
+# Create samples with reasonable ranges
+nsamples <- 100
+
+acres_samples <- runif(n = nsamples, min = 50, max = 200)
+costs_samples <- runif(n = nsamples, min = 3500, max = 4500)
+
+# Combine parameters for sampling
+params <- expand.grid(acres = acres_samples, production_cost = costs_samples)
+
+params_subset <- params[sample(nrow(params), 100), ]
+
+# Run the model for each parameter combination
+results <- pmap(params_subset, function(acres, production_cost) {
+  almond_profit(
+    clim = clim,
+    market_price = 5000,
+    production_cost = production_cost,
+    acres = acres
+  )
+})
+
+# Extract year and yield from each result
+yield_anomalies <- map_df(results, function(res) {
+  res %>% 
+    select(year, yield) %>%  # Changed from yield_anomaly to yield
+    mutate(run_id = cur_group_id())
+}, .id = "run_id")
+
+# Add parameter values to results
+yield_anomalies <- bind_cols(
+  yield_anomalies,
+  params_subset[as.numeric(yield_anomalies$run_id), ]
+)
+
+# Calculate summary statistics for each year
+yield_summary <- yield_anomalies %>%
+  group_by(year) %>%
+  summarise(
+    mean_yield = mean(yield),
+    median_yield = median(yield),
+    min_yield = min(yield),
+    max_yield = max(yield),
+    sd_yield = sd(yield)
+  )
+```
